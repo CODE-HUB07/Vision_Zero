@@ -1,2 +1,14 @@
+[project]
+name = "vision-zero"
+version = "0.1.0"
+description = "Traffic Rule Compliance Engine"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.22.0",
+    "pydantic>=2.0.0",
+    "sqlalchemy>=2.0.0"
+]
+
 [tool.vercel]
 entrypoint = "backend.api.index:app"
