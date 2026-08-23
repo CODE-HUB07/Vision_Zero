@@ -6,7 +6,10 @@ from datetime import datetime
 from database.database import get_db_connection
 
 SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
+try:
+    SMTP_PORT = int(os.environ.get("SMTP_PORT", "587") or "587")
+except ValueError:
+    SMTP_PORT = 587
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASS = os.environ.get("SMTP_PASS", "")
 SMTP_FROM = os.environ.get("SMTP_FROM", "safeguard-compliance@example.com")
