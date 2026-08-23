@@ -28,18 +28,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from database.github_sync import download_db, upload_db_async
+from database.github_sync import download_db, upload_db
 from fastapi import Request
 
 # Register API Router
 app.include_router(router, prefix="/api")
 
-# HTTP Middleware to sync database mutations back to GitHub asynchronously
+# HTTP Middleware to sync database mutations back to GitHub synchronously
 @app.middleware("http")
 async def db_sync_middleware(request: Request, call_next):
     response = await call_next(request)
     if request.method in ["POST", "PUT", "DELETE"] and 200 <= response.status_code < 300:
-        upload_db_async()
+        upload_db()
     return response
 
 @app.on_event("startup")
