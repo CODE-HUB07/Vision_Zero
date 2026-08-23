@@ -92,6 +92,9 @@ class NotificationStatusUpdate(BaseModel):
     event_type: str
     status: str
 
+class RedeemRequest(BaseModel):
+    reward_id: str
+
 # --- Auth Routes ---
 @router.post("/auth/register")
 def register(payload: RegisterRequest):
