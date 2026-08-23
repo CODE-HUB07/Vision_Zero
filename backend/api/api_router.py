@@ -128,7 +128,7 @@ def register(payload: RegisterRequest):
     conn.close()
     
     # Seed default stats and pod contributions dynamically
-    token = auth_svc.create_session(user_id)
+    token = auth_svc.create_session(user_id, name_clean, email_clean)
     
     return {
         "status": "registered",
@@ -160,7 +160,7 @@ def login(payload: LoginRequest):
     if not user or not auth_svc.verify_password(payload.password, user['hashed_password']):
         raise HTTPException(status_code=401, detail="Invalid email or password.")
         
-    token = auth_svc.create_session(user['id'])
+    token = auth_svc.create_session(user['id'], user['name'], user['email'])
     
     return {
         "status": "logged_in",
