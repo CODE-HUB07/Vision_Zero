@@ -97,6 +97,17 @@ def get_user_by_token(token: str) -> dict:
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
     row = cursor.fetchone()
+    
+    if not row:
+        from database.github_sync import download_db
+        print(f"[GitHub Sync] User {user_id} not found in database. Syncing...")
+        conn.close()
+        download_db()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        row = cursor.fetchone()
+        
     conn.close()
     
     if row:

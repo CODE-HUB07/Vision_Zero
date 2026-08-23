@@ -144,6 +144,17 @@ def login(payload: LoginRequest):
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM users WHERE email = ?", (email_clean,))
     user = cursor.fetchone()
+    
+    if not user:
+        from database.github_sync import download_db
+        print(f"[GitHub Sync] User email {email_clean} not found during login. Syncing...")
+        conn.close()
+        download_db()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE email = ?", (email_clean,))
+        user = cursor.fetchone()
+        
     conn.close()
     
     if not user or not auth_svc.verify_password(payload.password, user['hashed_password']):
