@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-safety-dark text-safety-textPrimary antialiased selection:bg-safety-primary selection:text-white;
+    font-family: 'Inter', sans-serif;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Outfit', sans-serif;
+    @apply font-semibold tracking-tight text-safety-textPrimary;
+  }
+}
+
+/* Elegant card panel utility styling */
+.glass-panel {
+  @apply bg-safety-card border border-safety-border rounded-md;
+}
+
+.glass-panel-hover {
+  @apply transition-colors duration-150 ease-in-out;
+}
+
+.glass-panel-hover:hover {
+  @apply border-safety-primary/40;
+}
+
+/* Clean numeric tabular styling */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Regulatory Speed Limit Sign rendering class */
+.speed-limit-sign {
+  @apply w-12 h-12 rounded-full bg-white border-[5px] border-red-600 flex items-center justify-center font-bold text-slate-950 text-lg select-none shadow-sm;
+}
+
+/* Custom scrollbars for light theme */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f3f5;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cfd4da;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #b8c0c9;
+}

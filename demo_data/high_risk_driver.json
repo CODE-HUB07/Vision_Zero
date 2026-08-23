@@ -1,0 +1,17 @@
+[
+  {"timestamp": "00:01", "speed": 38.0, "speedLimit": 40.0, "phoneUse": false},
+  {"timestamp": "00:02", "speed": 45.0, "speedLimit": 40.0, "phoneUse": false},
+  {"timestamp": "00:03", "speed": 52.0, "speedLimit": 40.0, "phoneUse": true},
+  {"timestamp": "00:04", "speed": 58.5, "speedLimit": 40.0, "phoneUse": true},
+  {"timestamp": "00:05", "speed": 62.0, "speedLimit": 40.0, "phoneUse": true},
+  {"timestamp": "00:06", "speed": 60.5, "speedLimit": 40.0, "phoneUse": false},
+  {"timestamp": "00:07", "speed": 54.0, "speedLimit": 40.0, "phoneUse": false},
+  {"timestamp": "00:08", "speed": 48.0, "speedLimit": 40.0, "phoneUse": true},
+  {"timestamp": "00:09", "speed": 44.0, "speedLimit": 40.0, "phoneUse": true},
+  {"timestamp": "00:10", "speed": 38.0, "speedLimit": 40.0, "phoneUse": false},
+  {"timestamp": "00:11", "speed": 48.5, "speedLimit": 40.0, "phoneUse": false},
+  {"timestamp": "00:12", "speed": 58.0, "speedLimit": 40.0, "phoneUse": true},
+  {"timestamp": "00:13", "speed": 56.5, "speedLimit": 40.0, "phoneUse": true},
+  {"timestamp": "00:14", "speed": 42.0, "speedLimit": 40.0, "phoneUse": false},
+  {"timestamp": "00:15", "speed": 35.0, "speedLimit": 40.0, "phoneUse": false}
+]
