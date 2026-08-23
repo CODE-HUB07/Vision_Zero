@@ -7,8 +7,8 @@ import os
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.database.database import init_db
-from backend.api.api_router import router
+from database.database import init_db
+from api.api_router import router
 
 app = FastAPI(
     title="Traffic Rule Compliance Engine API",
