@@ -1,4 +1,11 @@
-const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
+let API_BASE = import.meta.env.VITE_API_URL;
+if (!API_BASE) {
+  if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+    API_BASE = "http://127.0.0.1:8000/api";
+  } else {
+    API_BASE = "https://vision-zero.vercel.app/api";
+  }
+}
 
 async function request(path, options = {}) {
   const url = `${API_BASE}${path}`;
