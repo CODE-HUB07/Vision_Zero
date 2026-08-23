@@ -393,6 +393,16 @@ export default function App() {
         api.logout().catch(() => {});
       }
     } catch (_) {}
+    
+    // Clear active simulation timer and states on logout
+    if (simulatorTimerRef.current) {
+      clearInterval(simulatorTimerRef.current);
+      simulatorTimerRef.current = null;
+    }
+    setIsTripRunning(false);
+    setActiveTrip(null);
+    stopAlertSound();
+    
     localStorage.removeItem("safeguard_token");
     setToken(null);
     setUser(null);
