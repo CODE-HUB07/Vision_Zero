@@ -29,6 +29,10 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
         raise HTTPException(status_code=401, detail="Invalid token scheme.")
     token = authorization.split(" ")[1]
     
+    # Check if database needs cooldown sync before verifying user token
+    from database.github_sync import sync_on_cooldown
+    sync_on_cooldown()
+    
     user = auth_svc.get_user_by_token(token)
     if not user:
         raise HTTPException(status_code=401, detail="Session expired or invalid. Please log in again.")

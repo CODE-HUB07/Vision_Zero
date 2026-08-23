@@ -7,7 +7,7 @@ import threading
 
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 REPO_OWNER = os.environ.get("GITHUB_REPO_OWNER", "CODE-HUB07")
-REPO_NAME = os.environ.get("GITHUB_REPO_NAME", "Vision_Zero")
+REPO_NAME = os.environ.get("GITHUB_REPO_NAME", "Visioin_Zero")
 DB_FILE_PATH = "backend/database/traffic_compliance.db"
 
 # Import DB_PATH from database configuration
@@ -107,3 +107,17 @@ def upload_db_async():
     thread = threading.Thread(target=upload_db)
     thread.daemon = True
     thread.start()
+
+LAST_SYNC_TIME = 0
+SYNC_COOLDOWN = 5 # seconds
+
+def sync_on_cooldown():
+    global LAST_SYNC_TIME
+    if not GITHUB_TOKEN:
+        return
+    import time
+    now = time.time()
+    if now - LAST_SYNC_TIME > SYNC_COOLDOWN:
+        print(f"[GitHub Sync] Cooldown expired ({int(now - LAST_SYNC_TIME)}s). Syncing database...")
+        download_db()
+        LAST_SYNC_TIME = now
