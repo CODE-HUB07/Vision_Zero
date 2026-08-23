@@ -34,10 +34,14 @@ import emailjs from "@emailjs/browser";
 import { api } from "./services/api";
 import VisualizerCanvas from "./components/VisualizerCanvas";
 
+const EMAILJS_SERVICE_ID = (import.meta.env.VITE_EMAILJS_SERVICE_ID || "service_qemilcy").trim().replace(/['"]/g, "");
+const EMAILJS_TEMPLATE_ID = (import.meta.env.VITE_EMAILJS_TEMPLATE_ID || "template_n4q1n9a").trim().replace(/['"]/g, "");
+const EMAILJS_PUBLIC_KEY = (import.meta.env.VITE_EMAILJS_PUBLIC_KEY || "rAg8ZjmaFTEu0M1lV").trim().replace(/['"]/g, "");
+
 const isEmailJSDemoMode = 
-  !import.meta.env.VITE_EMAILJS_SERVICE_ID || 
-  import.meta.env.VITE_EMAILJS_PUBLIC_KEY === "user_safeguard_pk" ||
-  !import.meta.env.VITE_EMAILJS_PUBLIC_KEY;
+  !EMAILJS_SERVICE_ID || 
+  EMAILJS_PUBLIC_KEY === "user_safeguard_pk" ||
+  !EMAILJS_PUBLIC_KEY;
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("Dashboard");
@@ -429,9 +433,9 @@ export default function App() {
     console.log(`[EmailJS] Initiating parent email alert for event: ${eventType}`);
     
     // Default EmailJS credentials with safe fallbacks
-    const serviceId = import.meta.env.VITE_EMAILJS_SERVICE_ID || "service_safeguard";
-    const templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID || "template_alert";
-    const publicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY || "user_safeguard_pk";
+    const serviceId = EMAILJS_SERVICE_ID;
+    const templateId = EMAILJS_TEMPLATE_ID;
+    const publicKey = EMAILJS_PUBLIC_KEY;
 
     const lat = latitude !== null ? Number(latitude).toFixed(4) : "12.9716";
     const lon = longitude !== null ? Number(longitude).toFixed(4) : "77.5946";
