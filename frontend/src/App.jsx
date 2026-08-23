@@ -29,6 +29,7 @@ import {
 } from "recharts";
 import { api } from "./services/api";
 import VisualizerCanvas from "./components/VisualizerCanvas";
+import emailjs from '@emailjs/browser';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("Dashboard");
@@ -43,7 +44,8 @@ export default function App() {
     privacy_telemetry_on: true,
     privacy_location_minimal: true,
     privacy_data_retention_days: 30,
-    privacy_sharing_on: true
+    privacy_sharing_on: true,
+    parent_email: ""
   });
   
   const [dashboardStats, setDashboardStats] = useState(null);
@@ -82,6 +84,7 @@ export default function App() {
   const recordingPhoneRef = useRef(false);
   const recordingLimitRef = useRef(40);
   const simulatorTimerRef = useRef(null);
+  const emailSentRef = useRef(false);
   
   // Sync active trip reference for the timer thread
   useEffect(() => {
@@ -278,6 +281,7 @@ export default function App() {
       recordingSpeedRef.current = autopilotEnabled ? 30 : manualSpeed;
       recordingPhoneRef.current = autopilotEnabled ? false : manualPhone;
       recordingLimitRef.current = autopilotEnabled ? 40 : manualLimit;
+      emailSentRef.current = false;
       
       setActiveTrip(initialSession);
       setIsTripRunning(true);
@@ -345,6 +349,31 @@ export default function App() {
           setActiveNudge(response.nudges[0]);
         } else if (response.risk_level === "SAFE") {
           setActiveNudge(null);
+        }
+        
+        // EmailJS Parental Alert Trigger
+        if ((response.risk_level === "WARNING" || response.risk_level === "HIGH_RISK") && !emailSentRef.current) {
+          if (settings.parent_email && settings.parent_email.includes('@')) {
+            emailSentRef.current = true;
+            try {
+              emailjs.send(
+                'YOUR_SERVICE_ID', // Replace with EmailJS Service ID
+                'YOUR_TEMPLATE_ID', // Replace with EmailJS Template ID
+                {
+                  to_email: settings.parent_email,
+                  risk_level: response.risk_level,
+                  speed: Math.round(nextSpeed),
+                  speed_limit: Math.round(nextLimit),
+                  phone_use: nextPhone ? "Yes" : "No",
+                  time: timestamp
+                },
+                'YOUR_PUBLIC_KEY' // Replace with EmailJS Public Key
+              ).then(() => console.log('Parental alert email sent!'))
+               .catch(err => console.error('EmailJS Error:', err));
+            } catch (err) {
+              console.error('EmailJS Error:', err);
+            }
+          }
         }
         
         setActiveTrip(prev => {
@@ -665,6 +694,36 @@ export default function App() {
                   <span className="text-[9px] font-bold text-safety-textSecondary uppercase tracking-widest font-mono">Sessions Logged</span>
                   <div className="text-2xl font-extrabold text-safety-textPrimary font-mono">{completedTrips.length}</div>
                   <span className="text-[10px] text-safety-textSecondary block">Total compliance runs saved</span>
+                </div>
+              </div>
+
+              {/* Parental Email Controls */}
+              <div className="glass-panel p-6 space-y-4">
+                <div className="flex justify-between items-center">
+                  <div className="space-y-1">
+                    <h3 className="text-xs font-bold text-safety-textPrimary uppercase tracking-wider flex items-center gap-2">
+                      <Shield className="w-4 h-4 text-safety-primary" />
+                      Parental Alerts
+                    </h3>
+                    <p className="text-[10px] text-safety-textSecondary">Automatically email a guardian when high-risk behavior occurs.</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <input
+                    type="email"
+                    placeholder="Enter parent's email address..."
+                    className="flex-1 bg-white border border-safety-border text-xs rounded p-2 focus:outline-none focus:border-safety-primary"
+                    value={settings?.parent_email || ""}
+                    onChange={(e) => setSettings({ ...settings, parent_email: e.target.value })}
+                  />
+                  <button
+                    onClick={() => {
+                      api.updateSettings(settings).then(() => alert("Parental alert email saved successfully!")).catch(err => alert("Failed to save: " + err.message));
+                    }}
+                    className="px-4 py-2 bg-safety-primary text-white text-xs font-bold rounded hover:bg-teal-700 transition-colors"
+                  >
+                    Save Email
+                  </button>
                 </div>
               </div>
 

@@ -28,10 +28,17 @@ def init_db():
         privacy_telemetry_on BOOLEAN,
         privacy_location_minimal BOOLEAN,
         privacy_data_retention_days INTEGER,
-        privacy_sharing_on BOOLEAN
+        privacy_sharing_on BOOLEAN,
+        parent_email TEXT
     )
     """)
 
+    # Attempt to alter existing table to add parent_email (for backwards compatibility)
+    try:
+        cursor.execute("ALTER TABLE settings ADD COLUMN parent_email TEXT")
+    except sqlite3.OperationalError:
+        pass # Column likely already exists
+        
     # 2. Trips table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS trips (
@@ -128,8 +135,9 @@ def init_db():
         INSERT INTO settings (
             id, warning_threshold, critical_threshold, weight_minor_overspeed,
             weight_severe_overspeed, weight_phone_use, privacy_telemetry_on,
-            privacy_location_minimal, privacy_data_retention_days, privacy_sharing_on
-        ) VALUES (1, 5, 15, 5, 10, 10, 1, 1, 30, 1)
+            privacy_location_minimal, privacy_data_retention_days, privacy_sharing_on,
+            parent_email
+        ) VALUES (1, 5, 15, 5, 10, 10, 1, 1, 30, 1, '')
         """)
 
     # Seed default streak if empty

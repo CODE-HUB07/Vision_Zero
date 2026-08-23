@@ -17,7 +17,8 @@ def get_settings():
         "privacy_telemetry_on": True,
         "privacy_location_minimal": True,
         "privacy_data_retention_days": 30,
-        "privacy_sharing_on": True
+        "privacy_sharing_on": True,
+        "parent_email": ""
     }
 
 def update_settings(settings_dict):
@@ -33,7 +34,8 @@ def update_settings(settings_dict):
         privacy_telemetry_on = ?,
         privacy_location_minimal = ?,
         privacy_data_retention_days = ?,
-        privacy_sharing_on = ?
+        privacy_sharing_on = ?,
+        parent_email = ?
     WHERE id = 1
     """, (
         settings_dict.get("warning_threshold", 5),
@@ -44,7 +46,8 @@ def update_settings(settings_dict):
         int(settings_dict.get("privacy_telemetry_on", True)),
         int(settings_dict.get("privacy_location_minimal", True)),
         settings_dict.get("privacy_data_retention_days", 30),
-        int(settings_dict.get("privacy_sharing_on", True))
+        int(settings_dict.get("privacy_sharing_on", True)),
+        settings_dict.get("parent_email", "")
     ))
     conn.commit()
     conn.close()

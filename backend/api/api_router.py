@@ -26,6 +26,7 @@ class SettingsUpdate(BaseModel):
     privacy_location_minimal: bool
     privacy_data_retention_days: int
     privacy_sharing_on: bool
+    parent_email: Optional[str] = ""
 
 class TripStartRequest(BaseModel):
     trip_id: str
