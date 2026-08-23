@@ -2,15 +2,13 @@ import sys
 import os
 
 # Ensure backend directory is in python search path
-backend_dir = os.path.dirname(os.path.abspath(__file__))
-if backend_dir not in sys.path:
-    sys.path.insert(0, backend_dir)
+
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.database.database import init_db
-from api.api_router import router
+from backend.api.api_router import router
 
 app = FastAPI(
     title="Traffic Rule Compliance Engine API",
