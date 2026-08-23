@@ -1,10 +1,15 @@
 from database.database import get_db_connection
 
-def get_streak_summary():
+def get_streak_summary(user_id: int):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT current_streak, longest_streak, last_trip_date FROM streaks WHERE id = 1")
+    cursor.execute("SELECT current_streak, longest_streak, last_trip_date FROM streaks WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
+    if not row:
+        cursor.execute("INSERT INTO streaks (current_streak, longest_streak, last_trip_date, user_id) VALUES (0, 0, NULL, ?)", (user_id,))
+        conn.commit()
+        cursor.execute("SELECT current_streak, longest_streak, last_trip_date FROM streaks WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
     conn.close()
     
     current = row['current_streak'] if row else 0

@@ -16,7 +16,10 @@ import {
   Lock,
   Unlock,
   Menu,
-  ChevronLeft
+  ChevronLeft,
+  Mail,
+  RefreshCw,
+  LogOut
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -27,13 +30,43 @@ import {
   Tooltip,
   CartesianGrid
 } from "recharts";
+import emailjs from "@emailjs/browser";
 import { api } from "./services/api";
 import VisualizerCanvas from "./components/VisualizerCanvas";
-import emailjs from '@emailjs/browser';
+
+const isEmailJSDemoMode = 
+  !import.meta.env.VITE_EMAILJS_SERVICE_ID || 
+  import.meta.env.VITE_EMAILJS_PUBLIC_KEY === "user_safeguard_pk" ||
+  !import.meta.env.VITE_EMAILJS_PUBLIC_KEY;
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("Dashboard");
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  const showToast = (message, type = "success") => {
+    setToast({ message, type });
+  };
   
+  // Auth state
+  const [token, setToken] = useState(localStorage.getItem("safeguard_token"));
+  const [user, setUser] = useState(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  
+  // Auth forms state
+  const [authMode, setAuthMode] = useState("login"); // "login" or "register"
+  const [authName, setAuthName] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+
   // Settings & state
   const [settings, setSettings] = useState({
     warning_threshold: 5,
@@ -45,7 +78,8 @@ export default function App() {
     privacy_location_minimal: true,
     privacy_data_retention_days: 30,
     privacy_sharing_on: true,
-    parent_email: ""
+    parent_email: "",
+    guardian_enabled: false
   });
   
   const [dashboardStats, setDashboardStats] = useState(null);
@@ -55,7 +89,13 @@ export default function App() {
   const [redemptions, setRedemptions] = useState([]);
   const [peerPod, setPeerPod] = useState({ pod_name: "ROAD GUARDIANS", reputation: 90, rank: 2, members: [], leaderboard: [] });
   const [completedTrips, setCompletedTrips] = useState([]);
+  const [notificationsHistory, setNotificationsHistory] = useState([]);
   
+  // Profile Forms state
+  const [profileName, setProfileName] = useState("");
+  const [profilePassword, setProfilePassword] = useState("");
+  const [profileOldPassword, setProfileOldPassword] = useState("");
+
   // Trip history configurations
   const [historySort, setHistorySort] = useState("Latest");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -84,12 +124,35 @@ export default function App() {
   const recordingPhoneRef = useRef(false);
   const recordingLimitRef = useRef(40);
   const simulatorTimerRef = useRef(null);
-  const emailSentRef = useRef(false);
+  const emailSentRef = useRef({ OVERSPEED: false, PHONE_USE: false });
   
   // Sync active trip reference for the timer thread
   useEffect(() => {
     activeTripRef.current = activeTrip;
   }, [activeTrip]);
+
+  const deviceLocationRef = useRef(null);
+
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        deviceLocationRef.current = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude
+        };
+      },
+      (error) => {
+        console.warn("Geolocation watch failed:", error);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      }
+    );
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, []);
 
   // Handle dynamic changes in playback speed factor during active runs
   useEffect(() => {
@@ -189,17 +252,43 @@ export default function App() {
     };
   }, [isTripRunning, activeTrip?.riskLevel]);
 
-  // Load initial dataset on mount
+  // Auth verify effect
   useEffect(() => {
-    loadSettings();
-    loadDashboardData();
-    loadTripHistory();
-  }, []);
+    if (token) {
+      api.getMe()
+        .then(res => {
+          setUser(res);
+          setProfileName(res.name);
+          setIsAuthLoading(false);
+        })
+        .catch(err => {
+          console.error("Session verification failed:", err);
+          handleLogout();
+          setIsAuthLoading(false);
+        });
+    } else {
+      setIsAuthLoading(false);
+    }
+  }, [token]);
+
+  // Load user details when user state is initialized
+  useEffect(() => {
+    if (user) {
+      loadSettings();
+      loadDashboardData();
+      loadTripHistory();
+      loadNotificationsHistory();
+    }
+  }, [user]);
 
   const loadSettings = async () => {
     try {
       const data = await api.getSettings();
-      setSettings(data);
+      setSettings(prev => ({
+        ...prev,
+        ...data,
+        guardian_enabled: user ? !!user.guardian_enabled : false
+      }));
     } catch (e) {
       console.error("Error loading settings:", e);
     }
@@ -238,6 +327,25 @@ export default function App() {
     }
   };
 
+  const loadNotificationsHistory = async () => {
+    try {
+      const list = await api.getNotificationsHistory();
+      setNotificationsHistory(list);
+    } catch (e) {
+      console.error("Error loading notifications history:", e);
+    }
+  };
+
+  const handleRetryNotifications = async () => {
+    try {
+      const res = await api.retryNotifications();
+      alert(`Retry transmission complete. Attempts: ${res.retried_count}, Succeeded: ${res.success_count}`);
+      loadNotificationsHistory();
+    } catch (e) {
+      alert("Failed to retry queued notifications: " + e.message);
+    }
+  };
+
   const deleteTrip = async (tripId) => {
     if (!confirm("Are you sure you want to delete this trip record?")) return;
     try {
@@ -250,6 +358,116 @@ export default function App() {
     } catch (e) {
       alert("Failed to delete trip: " + e.message);
     }
+  };
+
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError("");
+    setAuthLoading(true);
+    try {
+      if (authMode === "login") {
+        const res = await api.login(authEmail, authPassword);
+        localStorage.setItem("safeguard_token", res.token);
+        setToken(res.token);
+        setUser(res.user);
+      } else {
+        const res = await api.register(authName, authEmail, authPassword);
+        localStorage.setItem("safeguard_token", res.token);
+        setToken(res.token);
+        setUser(res.user);
+      }
+    } catch (err) {
+      setAuthError(err.message || "Authentication failed.");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    try {
+      if (api.logout) {
+        api.logout().catch(() => {});
+      }
+    } catch (_) {}
+    localStorage.removeItem("safeguard_token");
+    setToken(null);
+    setUser(null);
+  };
+
+  const handleProfileUpdate = async (e) => {
+    e.preventDefault();
+    try {
+      // 1. Update user credentials and guardian flags
+      await api.updateProfile({
+        name: profileName,
+        password: profilePassword || null,
+        old_password: profileOldPassword || null,
+        guardian_email: settings.parent_email,
+        guardian_enabled: settings.guardian_enabled
+      });
+      
+      // 2. Update config parameters
+      await api.updateSettings(settings);
+      
+      showToast("Account information and threshold settings saved.", "success");
+      
+      // Refresh local user state
+      const updatedUser = await api.getMe();
+      setUser(updatedUser);
+      setProfilePassword("");
+      setProfileOldPassword("");
+      
+      loadSettings();
+      loadNotificationsHistory();
+    } catch (err) {
+      showToast("Failed to update profile settings: " + err.message, "error");
+    }
+  };
+
+  // --- Real-time Parental Alerts via EmailJS ---
+  const sendParentEmailViaEmailJS = (eventType, speed, limit, tripId, latitude = null, longitude = null) => {
+    console.log(`[EmailJS] Initiating parent email alert for event: ${eventType}`);
+    
+    // Default EmailJS credentials with safe fallbacks
+    const serviceId = import.meta.env.VITE_EMAILJS_SERVICE_ID || "service_safeguard";
+    const templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID || "template_alert";
+    const publicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY || "user_safeguard_pk";
+
+    const lat = latitude !== null ? Number(latitude).toFixed(4) : "12.9716";
+    const lon = longitude !== null ? Number(longitude).toFixed(4) : "77.5946";
+    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
+
+    const templateParams = {
+      driver_name: user ? user.name : "Driver",
+      parent_email: settings.parent_email,
+      event_type: eventType,
+      speed: speed ? Math.round(speed) : "N/A",
+      speed_limit: limit ? Math.round(limit) : "N/A",
+      timestamp: new Date().toLocaleString(),
+      risk_level: eventType === "OVERSPEED" ? "WARNING" : "HIGH_RISK",
+      time: new Date().toLocaleTimeString(),
+      phone_use: eventType === "PHONE_USE" ? "Yes (Exception Flagged)" : "No (Secure)",
+      location: `${lat}, ${lon}`,
+      google_maps_link: mapsUrl
+    };
+
+    emailjs.send(serviceId, templateId, templateParams, publicKey)
+      .then((res) => {
+        console.log("EmailJS Sent Successful:", res.status, res.text);
+        showToast("Guardian alert email sent successfully to " + settings.parent_email, "success");
+        // Update DB status to SENT
+        api.updateNotificationStatus(tripId, eventType, "SENT")
+          .then(() => loadNotificationsHistory())
+          .catch(e => console.error("Failed to update DB notification status:", e));
+      })
+      .catch((err) => {
+        console.error("EmailJS Sent Failed, queuing message:", err);
+        showToast("EmailJS transmission failed (queued locally): " + (err.text || err.message || err), "error");
+        // Ensure status stays QUEUED so manual retries are enabled
+        api.updateNotificationStatus(tripId, eventType, "QUEUED")
+          .then(() => loadNotificationsHistory())
+          .catch(e => console.error("Failed to update DB notification status:", e));
+      });
   };
 
   // --- Unified HUD Ingestion Engine ---
@@ -281,7 +499,7 @@ export default function App() {
       recordingSpeedRef.current = autopilotEnabled ? 30 : manualSpeed;
       recordingPhoneRef.current = autopilotEnabled ? false : manualPhone;
       recordingLimitRef.current = autopilotEnabled ? 40 : manualLimit;
-      emailSentRef.current = false;
+      emailSentRef.current = { OVERSPEED: false, PHONE_USE: false };
       
       setActiveTrip(initialSession);
       setIsTripRunning(true);
@@ -330,14 +548,21 @@ export default function App() {
       
       try {
         const timestamp = new Date().toLocaleTimeString();
+        let lat = 12.9716 + (duration * 0.0001);
+        let lon = 77.5946 + (duration * 0.00015);
+        if (deviceLocationRef.current) {
+          lat = deviceLocationRef.current.latitude;
+          lon = deviceLocationRef.current.longitude;
+        }
+        
         const response = await api.sendTelemetryTick({
           trip_id: tId,
           speed: nextSpeed,
           speed_limit: nextLimit,
           phone_use: nextPhone,
           timestamp,
-          latitude: 12.9716 + (duration * 0.0001),
-          longitude: 77.5946 + (duration * 0.00015),
+          latitude: lat,
+          longitude: lon,
           source: autopilotEnabled ? "simulator" : "manual"
         });
         
@@ -350,29 +575,19 @@ export default function App() {
         } else if (response.risk_level === "SAFE") {
           setActiveNudge(null);
         }
-        
-        // EmailJS Parental Alert Trigger
-        if ((response.risk_level === "WARNING" || response.risk_level === "HIGH_RISK") && !emailSentRef.current) {
-          if (settings.parent_email && settings.parent_email.includes('@')) {
-            emailSentRef.current = true;
-            try {
-              emailjs.send(
-                'YOUR_SERVICE_ID', // Replace with EmailJS Service ID
-                'YOUR_TEMPLATE_ID', // Replace with EmailJS Template ID
-                {
-                  to_email: settings.parent_email,
-                  risk_level: response.risk_level,
-                  speed: Math.round(nextSpeed),
-                  speed_limit: Math.round(nextLimit),
-                  phone_use: nextPhone ? "Yes" : "No",
-                  time: timestamp
-                },
-                'YOUR_PUBLIC_KEY' // Replace with EmailJS Public Key
-              ).then(() => console.log('Parental alert email sent!'))
-               .catch(err => console.error('EmailJS Error:', err));
-            } catch (err) {
-              console.error('EmailJS Error:', err);
-            }
+
+        // Trigger real-time Parental alerts via EmailJS library
+        if (settings.guardian_enabled && settings.parent_email && settings.parent_email.includes("@")) {
+          if (response.events && response.events.length > 0) {
+            response.events.forEach(ev => {
+              if (ev.event_type === "OVERSPEED" && !emailSentRef.current.OVERSPEED) {
+                emailSentRef.current.OVERSPEED = true;
+                sendParentEmailViaEmailJS("OVERSPEED", ev.speed, ev.speed_limit, tId, lat, lon);
+              } else if (ev.event_type === "PHONE_USE" && !emailSentRef.current.PHONE_USE) {
+                emailSentRef.current.PHONE_USE = true;
+                sendParentEmailViaEmailJS("PHONE_USE", ev.speed, ev.speed_limit, tId, lat, lon);
+              }
+            });
           }
         }
         
@@ -438,6 +653,7 @@ export default function App() {
       setActiveNudge(null);
       loadDashboardData();
       loadTripHistory();
+      loadNotificationsHistory();
       
       // Update activeTrip with completion stats to render summary card
       setActiveTrip(prev => ({
@@ -486,7 +702,114 @@ export default function App() {
     : activeTab === "HUD" ? "Active Safety HUD"
     : activeTab === "History" ? "Historical Audits"
     : activeTab === "Leaderboard" ? "Leaderboard standings"
-    : "Rewards balance & redemptions";
+    : activeTab === "Rewards" ? "Rewards balance & redemptions"
+    : "Profile & safety settings";
+
+  // Login Check
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-safety-dark flex flex-col items-center justify-center">
+        <div className="w-10 h-10 border-4 border-safety-primary border-t-transparent rounded-full animate-spin mb-4" />
+        <span className="text-xs font-bold text-safety-textSecondary uppercase tracking-widest">Verifying Compliance Session...</span>
+      </div>
+    );
+  }
+
+  if (!token || !user) {
+    return (
+      <div className="min-h-screen bg-safety-dark flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-md w-full space-y-8 bg-white border border-safety-border p-8 rounded-lg shadow-sm">
+          <div className="flex flex-col items-center">
+            <div className="w-12 h-12 rounded-full bg-teal-50 flex items-center justify-center mb-3">
+              <Shield className="w-6 h-6 text-safety-primary" />
+            </div>
+            <h2 className="text-2xl font-extrabold text-safety-textPrimary uppercase tracking-wider font-display text-center">
+              SafeGuard Compliance
+            </h2>
+            <p className="mt-2 text-xs text-safety-textSecondary tracking-wider uppercase">
+              {authMode === "login" ? "Sign in to your driver account" : "Create a new driver profile"}
+            </p>
+          </div>
+
+          <form className="mt-8 space-y-4" onSubmit={handleAuthSubmit}>
+            {authError && (
+              <div className="p-3 bg-red-50 border border-red-200 text-safety-critical text-xs rounded font-medium">
+                {authError}
+              </div>
+            )}
+            
+            {authMode === "register" && (
+              <div>
+                <label className="block text-[10px] font-bold text-safety-textSecondary uppercase tracking-widest mb-1.5">
+                  Driver Name
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={authName}
+                  onChange={(e) => setAuthName(e.target.value)}
+                  placeholder="e.g. John Doe"
+                  className="w-full bg-slate-50 border border-safety-border text-xs rounded p-2.5 text-slate-900 focus:outline-none focus:border-safety-primary focus:bg-white transition-colors"
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="block text-[10px] font-bold text-safety-textSecondary uppercase tracking-widest mb-1.5">
+                Email Address
+              </label>
+              <input
+                type="email"
+                required
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                placeholder="driver@fleet.com"
+                className="w-full bg-slate-50 border border-safety-border text-xs rounded p-2.5 text-slate-900 focus:outline-none focus:border-safety-primary focus:bg-white transition-colors"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-safety-textSecondary uppercase tracking-widest mb-1.5">
+                Password
+              </label>
+              <input
+                type="password"
+                required
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full bg-slate-50 border border-safety-border text-xs rounded p-2.5 text-slate-900 focus:outline-none focus:border-safety-primary focus:bg-white transition-colors"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={authLoading}
+              className="w-full py-3 bg-safety-primary text-white hover:bg-teal-700 rounded text-xs font-bold uppercase tracking-widest transition-colors flex items-center justify-center gap-2"
+            >
+              {authLoading ? (
+                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <span>{authMode === "login" ? "Sign In" : "Register Profile"}</span>
+              )}
+            </button>
+          </form>
+
+          <div className="text-center pt-4 border-t border-safety-border">
+            <button
+              onClick={() => {
+                setAuthMode(authMode === "login" ? "register" : "login");
+                setAuthError("");
+              }}
+              className="text-xs font-semibold text-safety-primary hover:underline uppercase tracking-wider"
+            >
+              {authMode === "login" ? "Create an account" : "Back to sign in"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-safety-dark text-safety-textPrimary font-sans overflow-hidden">
@@ -506,7 +829,8 @@ export default function App() {
             { id: "HUD", icon: Radio, label: "Active Safety HUD" },
             { id: "History", icon: History, label: "Historical Audits" },
             { id: "Leaderboard", icon: Users, label: "Leaderboard" },
-            { id: "Rewards", icon: Award, label: "Rewards" }
+            { id: "Rewards", icon: Award, label: "Rewards" },
+            { id: "Profile", icon: UserCheck, label: "Profile" }
           ].map(item => {
             const isActive = activeTab === item.id;
             return (
@@ -528,9 +852,18 @@ export default function App() {
             );
           })}
         </nav>
-        
-        <div className="p-4 border-t border-safety-border text-[9px] font-mono text-safety-textSecondary uppercase tracking-widest text-center">
-          Secured Compliance Engine
+
+        <div className="p-4 border-t border-safety-border space-y-3">
+          <div className="text-xs font-semibold text-safety-textPrimary truncate px-2">
+            Hi, {user.name}
+          </div>
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-[10px] font-bold text-safety-textSecondary hover:bg-red-50 hover:text-safety-critical transition-colors uppercase tracking-wider"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Sign Out</span>
+          </button>
         </div>
       </aside>
 
@@ -555,7 +888,8 @@ export default function App() {
                 { id: "HUD", icon: Radio, label: "Active Safety HUD" },
                 { id: "History", icon: History, label: "Historical Audits" },
                 { id: "Leaderboard", icon: Users, label: "Leaderboard" },
-                { id: "Rewards", icon: Award, label: "Rewards" }
+                { id: "Rewards", icon: Award, label: "Rewards" },
+                { id: "Profile", icon: UserCheck, label: "Profile" }
               ].map(item => {
                 const isActive = activeTab === item.id;
                 return (
@@ -578,6 +912,22 @@ export default function App() {
                 );
               })}
             </nav>
+            
+            <div className="pt-4 border-t border-safety-border space-y-2">
+              <div className="text-[10px] text-safety-textPrimary font-semibold truncate">
+                Logged in as {user.name}
+              </div>
+              <button
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  handleLogout();
+                }}
+                className="w-full flex items-center gap-2 py-1.5 rounded text-[10px] font-bold text-safety-textSecondary hover:text-safety-critical transition-colors uppercase tracking-wider"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Sign Out</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -697,36 +1047,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Parental Email Controls */}
-              <div className="glass-panel p-6 space-y-4">
-                <div className="flex justify-between items-center">
-                  <div className="space-y-1">
-                    <h3 className="text-xs font-bold text-safety-textPrimary uppercase tracking-wider flex items-center gap-2">
-                      <Shield className="w-4 h-4 text-safety-primary" />
-                      Parental Alerts
-                    </h3>
-                    <p className="text-[10px] text-safety-textSecondary">Automatically email a guardian when high-risk behavior occurs.</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <input
-                    type="email"
-                    placeholder="Enter parent's email address..."
-                    className="flex-1 bg-white border border-safety-border text-xs rounded p-2 focus:outline-none focus:border-safety-primary"
-                    value={settings?.parent_email || ""}
-                    onChange={(e) => setSettings({ ...settings, parent_email: e.target.value })}
-                  />
-                  <button
-                    onClick={() => {
-                      api.updateSettings(settings).then(() => alert("Parental alert email saved successfully!")).catch(err => alert("Failed to save: " + err.message));
-                    }}
-                    className="px-4 py-2 bg-safety-primary text-white text-xs font-bold rounded hover:bg-teal-700 transition-colors"
-                  >
-                    Save Email
-                  </button>
-                </div>
-              </div>
-
               {/* Score Trend & Exceptions log */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 
@@ -797,7 +1117,6 @@ export default function App() {
               {/* Telemetry visualizer & manual inputs */}
               <div className="lg:col-span-2 space-y-6">
                 
-                {/* Visualizer canvas */}
                 <VisualizerCanvas
                   telemetry={activeTrip?.ticks || []}
                   currentSpeed={activeTrip?.speed || 0}
@@ -941,7 +1260,7 @@ export default function App() {
 
                     <div className="bg-slate-50 border border-safety-border p-3.5 rounded flex items-center justify-between">
                       <div>
-                        <span className="text-[9px] font-bold text-safety-textSecondary uppercase tracking-widest block mb-1">Speed limit</span>
+                        <span className="text-[9px] font-bold text-safety-textSecondary uppercase tracking-widest block mb-1">Speed</span>
                         <span className="text-xl font-mono font-extrabold text-safety-textPrimary">{activeTrip ? Math.round(activeTrip.speed) : 0} <span className="text-[10px] text-safety-textSecondary font-sans">KM/H</span></span>
                       </div>
                       
@@ -1316,10 +1635,10 @@ export default function App() {
 
                   <div className="space-y-3">
                     {podMembers.map((member, idx) => {
-                      const displayName = member.is_user ? "Alexander Sterling-Wellesley III (Fleet Lead)" : member.member_name;
+                      const displayName = member.is_user ? `${user.name} (You)` : member.member_name;
                       return (
                         <div
-                          key={member.id}
+                          key={member.id || idx}
                           className={`flex items-center justify-between p-3 border rounded transition-colors ${
                             member.is_user
                               ? "bg-teal-50/40 border-safety-primary/40"
@@ -1344,7 +1663,7 @@ export default function App() {
                     })}
                   </div>
 
-                  {/* Cooperative Feedback (replacing badges) */}
+                  {/* Cooperative Feedback */}
                   <div className="bg-slate-50 border border-safety-border p-3 rounded mt-2">
                     <span className="text-[9px] font-bold text-safety-textSecondary uppercase tracking-widest block mb-1">Cooperative Performance</span>
                     <p className="text-xs text-safety-textPrimary leading-relaxed">{peerPod.social_feedback}</p>
@@ -1460,6 +1779,216 @@ export default function App() {
             </div>
           )}
 
+          {/* TAB 6: PROFILE & SETTINGS */}
+          {activeTab === "Profile" && (
+            <div className="space-y-6">
+              
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                {/* Driver Account Panel */}
+                <div className="glass-panel p-6 space-y-6 lg:col-span-2">
+                  <div className="space-y-1 pb-4 border-b border-safety-border">
+                    <h3 className="text-xs font-bold text-safety-textPrimary uppercase tracking-wider">Driver Profile Settings</h3>
+                    <p className="text-[10px] text-safety-textSecondary">Update your driver identification details and account security credentials</p>
+                  </div>
+
+                  <form onSubmit={handleProfileUpdate} className="space-y-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-bold text-safety-textSecondary uppercase tracking-widest mb-1.5">Driver Name</label>
+                        <input
+                          type="text"
+                          required
+                          value={profileName}
+                          onChange={(e) => setProfileName(e.target.value)}
+                          className="w-full bg-slate-50 border border-safety-border text-xs rounded p-2.5 text-slate-900 focus:outline-none focus:border-safety-primary focus:bg-white transition-colors"
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-[10px] font-bold text-safety-textSecondary uppercase tracking-widest mb-1.5">Email Address</label>
+                        <input
+                          type="email"
+                          disabled
+                          value={user.email}
+                          className="w-full bg-slate-100 border border-safety-border text-xs rounded p-2.5 text-safety-textSecondary cursor-not-allowed"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="border-t border-safety-border pt-4 space-y-4">
+                      <h4 className="text-[10px] font-bold text-safety-textSecondary uppercase tracking-widest">Update Password</h4>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] font-bold text-safety-textSecondary uppercase tracking-widest mb-1.5">Old Password</label>
+                          <input
+                            type="password"
+                            value={profileOldPassword}
+                            onChange={(e) => setProfileOldPassword(e.target.value)}
+                            placeholder="Enter old password..."
+                            className="w-full bg-slate-50 border border-safety-border text-xs rounded p-2.5 text-slate-900 focus:outline-none focus:border-safety-primary focus:bg-white transition-colors"
+                          />
+                        </div>
+                        
+                        <div>
+                          <label className="block text-[10px] font-bold text-safety-textSecondary uppercase tracking-widest mb-1.5">New Password</label>
+                          <input
+                            type="password"
+                            value={profilePassword}
+                            onChange={(e) => setProfilePassword(e.target.value)}
+                            placeholder="Enter new password..."
+                            className="w-full bg-slate-50 border border-safety-border text-xs rounded p-2.5 text-slate-900 focus:outline-none focus:border-safety-primary focus:bg-white transition-colors"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-safety-border pt-4 space-y-4">
+                      <h4 className="text-[10px] font-bold text-safety-textSecondary uppercase tracking-widest">Compliance Limits Configuration</h4>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-[10px] font-bold text-safety-textSecondary uppercase tracking-widest mb-1.5">Warning Threshold (KM/H)</label>
+                          <input
+                            type="number"
+                            value={settings.warning_threshold}
+                            onChange={(e) => setSettings({ ...settings, warning_threshold: parseInt(e.target.value) || 0 })}
+                            className="w-full bg-slate-50 border border-safety-border text-xs rounded p-2.5 text-slate-900 focus:outline-none focus:border-safety-primary focus:bg-white transition-colors"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-bold text-safety-textSecondary uppercase tracking-widest mb-1.5">Critical Threshold (KM/H)</label>
+                          <input
+                            type="number"
+                            value={settings.critical_threshold}
+                            onChange={(e) => setSettings({ ...settings, critical_threshold: parseInt(e.target.value) || 0 })}
+                            className="w-full bg-slate-50 border border-safety-border text-xs rounded p-2.5 text-slate-900 focus:outline-none focus:border-safety-primary focus:bg-white transition-colors"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-bold text-safety-textSecondary uppercase tracking-widest mb-1.5">Data Retention (Days)</label>
+                          <input
+                            type="number"
+                            value={settings.privacy_data_retention_days}
+                            onChange={(e) => setSettings({ ...settings, privacy_data_retention_days: parseInt(e.target.value) || 30 })}
+                            className="w-full bg-slate-50 border border-safety-border text-xs rounded p-2.5 text-slate-900 focus:outline-none focus:border-safety-primary focus:bg-white transition-colors"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end pt-4 border-t border-safety-border">
+                      <button
+                        type="submit"
+                        className="px-6 py-2.5 bg-safety-primary text-white hover:bg-teal-700 rounded text-xs font-bold uppercase tracking-widest transition-colors"
+                      >
+                        Save Profile & Settings
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* Right Side: Parental Notifications and logs */}
+                <div className="space-y-6">
+                  
+                  {/* Guardian Email Controls */}
+                  <div className="glass-panel p-6 space-y-4">
+                    <div className="space-y-1">
+                      <h3 className="text-xs font-bold text-safety-textPrimary uppercase tracking-wider flex items-center gap-2">
+                        <Mail className="w-4 h-4 text-safety-primary" />
+                        Guardian Alerts
+                      </h3>
+                      <p className="text-[10px] text-safety-textSecondary">Receive automatic email reports when severe infractions are logged.</p>
+                    </div>
+                    
+                    {isEmailJSDemoMode && (
+                      <div className="p-3 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-800 leading-relaxed">
+                        <strong>Demo Mode Active:</strong> Real-time emails require configuration. Create a <code>.env</code> file in your <code>frontend/</code> directory with your <code>VITE_EMAILJS_PUBLIC_KEY</code> to enable live delivery.
+                      </div>
+                    )}
+                    
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-safety-textSecondary uppercase tracking-widest mb-1.5">Guardian Email Address</label>
+                        <input
+                          type="email"
+                          placeholder="guardian@email.com"
+                          className="w-full bg-slate-50 border border-safety-border text-xs rounded p-2.5 text-slate-900 focus:outline-none focus:border-safety-primary"
+                          value={settings.parent_email || ""}
+                          onChange={(e) => setSettings({ ...settings, parent_email: e.target.value })}
+                        />
+                      </div>
+
+                      <label className="flex items-center gap-2 select-none cursor-pointer pt-2">
+                        <input
+                          type="checkbox"
+                          checked={!!settings.guardian_enabled}
+                          onChange={(e) => setSettings({ ...settings, guardian_enabled: e.target.checked })}
+                          className="rounded border-safety-border text-safety-primary focus:ring-0 w-4 h-4"
+                        />
+                        <span className="text-xs font-semibold text-safety-textPrimary">Enable Live Guardian Notification Alerts</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Parental Alert Log & Manual Queue Retry */}
+                  <div className="glass-panel p-6 space-y-4 flex flex-col justify-between">
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                        <h3 className="text-xs font-bold text-safety-textPrimary uppercase tracking-wider">Guardian Mail Transmission Log</h3>
+                        <button
+                          onClick={handleRetryNotifications}
+                          className="flex items-center gap-1.5 px-2.5 py-1 bg-teal-50 hover:bg-teal-100 border border-safety-primary/30 rounded text-[10px] font-bold text-safety-primary uppercase tracking-wider transition-colors"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          Retry Queue
+                        </button>
+                      </div>
+
+                      <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                        {notificationsHistory.length === 0 ? (
+                          <p className="text-xs text-safety-textSecondary italic py-4 text-center">No alerts have been queued or transmitted.</p>
+                        ) : (
+                          notificationsHistory.map((log) => (
+                            <div key={log.id} className="p-3 bg-slate-50 border border-safety-border rounded text-xs space-y-1.5">
+                              <div className="flex justify-between items-center">
+                                <span className="font-bold text-[9px] uppercase tracking-wider text-safety-textPrimary">
+                                  {log.event_type}
+                                </span>
+                                <span className={`font-mono text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                                  log.status === "SENT" ? "bg-green-50 text-safety-success" : "bg-amber-50 text-safety-warning"
+                                }`}>
+                                  {log.status}
+                                </span>
+                              </div>
+                              
+                              <p className="text-[10px] text-safety-textSecondary font-mono truncate">
+                                Recipient: {log.recipient}
+                              </p>
+                              
+                              <div className="flex justify-between items-center text-[9px] text-safety-textSecondary font-mono pt-1">
+                                <span>Time: {log.timestamp.slice(11, 19)}</span>
+                                {log.status === "QUEUED" && (
+                                  <span className="text-safety-warning animate-pulse">Pending connection retry</span>
+                                )}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+
+              </div>
+
+            </div>
+          )}
+
         </main>
       </div>
 
@@ -1534,6 +2063,45 @@ export default function App() {
             </button>
 
           </div>
+        </div>
+      )}
+
+      {toast && (
+        <div 
+          style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            padding: '12px 18px',
+            borderRadius: '8px',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            border: '1px solid',
+            transition: 'all 0.3s ease-in-out'
+          }}
+          className={
+            toast.type === "success" 
+              ? "bg-teal-50 border-teal-200 text-teal-900" 
+              : toast.type === "error"
+              ? "bg-rose-50 border-rose-200 text-rose-900"
+              : "bg-amber-50 border-amber-200 text-amber-900"
+          }
+        >
+          {toast.type === "success" ? (
+            <div className="bg-teal-500 text-white p-1 rounded-full"><Check className="w-3.5 h-3.5" /></div>
+          ) : (
+            <div className="bg-rose-500 text-white p-1 rounded-full"><AlertTriangle className="w-3.5 h-3.5" /></div>
+          )}
+          <div className="flex flex-col">
+            <span className="text-xs font-bold">{toast.type === "success" ? "Notification Sent" : "Transmission Status"}</span>
+            <span className="text-[10px] opacity-80">{toast.message}</span>
+          </div>
+          <button onClick={() => setToast(null)} className="ml-2 hover:opacity-75 p-1 rounded-full hover:bg-black/5">
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 

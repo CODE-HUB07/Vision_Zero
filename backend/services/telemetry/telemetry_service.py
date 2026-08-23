@@ -1,7 +1,8 @@
 from database.database import get_db_connection
 from services.behaviour.behaviour_service import process_telemetry_compliance
+from services.notification_service import trigger_alert
 
-def start_trip(trip_id, mode, start_time):
+def start_trip(trip_id, mode, start_time, user_id):
     """
     Initializes a new trip in the SQLite database with 100 safety score.
     """
@@ -11,9 +12,9 @@ def start_trip(trip_id, mode, start_time):
         INSERT INTO trips (
             id, mode, start_time, end_time, duration_seconds, distance_km,
             avg_speed, max_speed, speed_compliance_pct, phone_free_pct,
-            overspeed_count, phone_use_count, nudge_count, safety_score, points_earned
-        ) VALUES (?, ?, ?, NULL, 0, 0.0, 0.0, 0.0, 100.0, 100.0, 0, 0, 0, 100.0, 0)
-    """, (trip_id, mode, start_time))
+            overspeed_count, phone_use_count, nudge_count, safety_score, points_earned, user_id
+        ) VALUES (?, ?, ?, NULL, 0, 0.0, 0.0, 0.0, 100.0, 100.0, 0, 0, 0, 100.0, 0, ?)
+    """, (trip_id, mode, start_time, user_id))
     conn.commit()
     conn.close()
     return {"status": "started", "trip_id": trip_id}
@@ -23,25 +24,45 @@ def log_telemetry_tick(trip_id, speed, speed_limit, phone_use, timestamp, latitu
     Saves a telemetry tick, performs safety compliance checks, updates
     the trip metrics in real-time, and returns nudge & risk events.
     """
-    # 1. Run behaviour checks
-    result = process_telemetry_compliance(trip_id, speed, speed_limit, phone_use, timestamp, source)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # 1. Fetch user_id for this trip
+    cursor.execute("SELECT user_id FROM trips WHERE id = ?", (trip_id,))
+    trip_row = cursor.fetchone()
+    user_id = trip_row['user_id'] if trip_row else 1
+    
+    # 2. Run behaviour checks
+    result = process_telemetry_compliance(user_id, trip_id, speed, speed_limit, phone_use, timestamp, source)
     risk_level = result["risk_level"]
     score_deduction = result["score_deduction"]
     events = result["events"]
     nudges = result["nudges"]
     
-    # 2. Insert telemetry record
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    # 3. Trigger Parental notifications
+    for ev in events:
+        if ev['event_type'] in ('OVERSPEED', 'PHONE_USE'):
+            trigger_alert(
+                user_id=user_id,
+                trip_id=trip_id,
+                event_type=ev['event_type'],
+                speed=ev.get('speed'),
+                limit=ev.get('speed_limit'),
+                latitude=latitude,
+                longitude=longitude
+            )
+    
+    # 4. Insert telemetry record
     cursor.execute("""
         INSERT INTO telemetry_records (trip_id, timestamp, speed, speed_limit, phone_use, latitude, longitude, risk_level)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, (trip_id, timestamp, speed, speed_limit, int(phone_use), latitude, longitude, risk_level))
     
-    # 3. Update trip stats
+    # 5. Update trip stats
     cursor.execute("SELECT * FROM trips WHERE id = ?", (trip_id,))
     trip = cursor.fetchone()
     
+    new_safety_score = 100.0
     if trip:
         # Fetch all telemetry ticks for this trip to compute statistics
         cursor.execute("SELECT speed, speed_limit, phone_use FROM telemetry_records WHERE trip_id = ?", (trip_id,))
@@ -96,7 +117,7 @@ def log_telemetry_tick(trip_id, speed, speed_limit, phone_use, timestamp, latitu
         "risk_level": risk_level,
         "events": events,
         "nudges": nudges,
-        "safety_score": new_safety_score if trip else 100.0
+        "safety_score": new_safety_score
     }
 
 def end_trip(trip_id, end_time):
@@ -113,6 +134,8 @@ def end_trip(trip_id, end_time):
         conn.close()
         return {"error": "Trip not found"}
         
+    user_id = trip['user_id'] if trip['user_id'] else 1
+    
     # Calculate points earned:
     # 0 points if safety score is under 51.
     # Otherwise, points are based on the safety index (score / 5) plus compliance bonuses:
@@ -141,8 +164,17 @@ def end_trip(trip_id, end_time):
     is_safe_trip = trip['safety_score'] >= 80.0
     
     # 1. Update streak
-    cursor.execute("SELECT current_streak, longest_streak FROM streaks WHERE id = 1")
+    cursor.execute("SELECT current_streak, longest_streak FROM streaks WHERE user_id = ?", (user_id,))
     streak_row = cursor.fetchone()
+    if not streak_row:
+        cursor.execute("""
+            INSERT INTO streaks (current_streak, longest_streak, last_trip_date, user_id)
+            VALUES (0, 0, NULL, ?)
+        """, (user_id,))
+        conn.commit()
+        cursor.execute("SELECT current_streak, longest_streak FROM streaks WHERE user_id = ?", (user_id,))
+        streak_row = cursor.fetchone()
+        
     current_streak = streak_row['current_streak']
     longest_streak = streak_row['longest_streak']
     
@@ -158,18 +190,26 @@ def end_trip(trip_id, end_time):
             current_streak = ?,
             longest_streak = ?,
             last_trip_date = ?
-        WHERE id = 1
-    """, (current_streak, longest_streak, end_time))
+        WHERE user_id = ?
+    """, (current_streak, longest_streak, end_time, user_id))
     
     # 2. Update user's weekly score and streak in the peer pod
-    cursor.execute("SELECT weekly_score, contribution FROM peer_pods WHERE is_user = 1")
+    cursor.execute("SELECT weekly_score, contribution FROM peer_pods WHERE is_user = 1 AND user_id = ?", (user_id,))
     user_pod = cursor.fetchone()
+    if not user_pod:
+        # Resolve username
+        cursor.execute("SELECT name FROM users WHERE id = ?", (user_id,))
+        uname = cursor.fetchone()['name']
+        cursor.execute("""
+            INSERT INTO peer_pods (pod_name, member_name, weekly_score, streak, contribution, is_user, user_id)
+            VALUES ('ROAD GUARDIANS', ?, 100, 0, 0, 1, ?)
+        """, (uname, user_id))
+        conn.commit()
+        cursor.execute("SELECT weekly_score, contribution FROM peer_pods WHERE is_user = 1 AND user_id = ?", (user_id,))
+        user_pod = cursor.fetchone()
+        
     if user_pod:
-        # Pod Weekly Score is average of members. For user, update their weekly score contribution:
-        # user weekly score is a rolling window of recent safety scores (e.g. this score + previous avg)
-        # For simplicity, we can do: new weekly score = (prev * 4 + new_trip_score) / 5
         new_weekly = int((user_pod['weekly_score'] * 4 + trip['safety_score']) / 5)
-        # points contribution = user points earned from the trip
         new_contrib = user_pod['contribution'] + points_earned
         
         cursor.execute("""
@@ -177,8 +217,8 @@ def end_trip(trip_id, end_time):
                 weekly_score = ?,
                 streak = ?,
                 contribution = ?
-            WHERE is_user = 1
-        """, (new_weekly, current_streak, new_contrib))
+            WHERE is_user = 1 AND user_id = ?
+        """, (new_weekly, current_streak, new_contrib, user_id))
         
     conn.commit()
     conn.close()

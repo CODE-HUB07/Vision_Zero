@@ -16,6 +16,45 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    # 0. Users table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        hashed_password TEXT NOT NULL,
+        guardian_email TEXT,
+        guardian_enabled BOOLEAN DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # Sessions table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        expires_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """)
+
+    # Notifications table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        trip_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        content TEXT NOT NULL,
+        status TEXT NOT NULL,
+        timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+        FOREIGN KEY (trip_id) REFERENCES trips (id) ON DELETE CASCADE
+    )
+    """)
+
     # 1. Settings table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS settings (
@@ -126,26 +165,56 @@ def init_db():
     )
     """)
 
+    # Apply user_id migrations to existing tables
+    for table in ["settings", "trips", "streaks", "user_rewards", "peer_pods", "events"]:
+        try:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN user_id INTEGER")
+        except sqlite3.OperationalError:
+            pass
+
     conn.commit()
 
-    # Seed default settings if empty
-    cursor.execute("SELECT COUNT(*) FROM settings")
+    # Seed default user if empty
+    cursor.execute("SELECT COUNT(*) FROM users")
+    if cursor.fetchone()[0] == 0:
+        import hashlib
+        import secrets
+        salt = secrets.token_hex(16)
+        hashed = hashlib.pbkdf2_hmac('sha256', b'password', salt.encode('utf-8'), 100000).hex()
+        stored = f"{salt}:{hashed}"
+        cursor.execute("""
+            INSERT INTO users (id, name, email, hashed_password, guardian_email, guardian_enabled)
+            VALUES (1, 'Default Driver', 'driver@safeguard.com', ?, '', 0)
+        """, (stored,))
+        conn.commit()
+
+    # Bind loose rows to the default user (id = 1)
+    cursor.execute("UPDATE settings SET user_id = 1 WHERE user_id IS NULL")
+    cursor.execute("UPDATE trips SET user_id = 1 WHERE user_id IS NULL")
+    cursor.execute("UPDATE streaks SET user_id = 1 WHERE user_id IS NULL")
+    cursor.execute("UPDATE user_rewards SET user_id = 1 WHERE user_id IS NULL")
+    cursor.execute("UPDATE peer_pods SET user_id = 1 WHERE user_id IS NULL")
+    cursor.execute("UPDATE events SET user_id = 1 WHERE user_id IS NULL")
+    conn.commit()
+
+    # Seed default settings for user 1 if empty
+    cursor.execute("SELECT COUNT(*) FROM settings WHERE user_id = 1")
     if cursor.fetchone()[0] == 0:
         cursor.execute("""
         INSERT INTO settings (
             id, warning_threshold, critical_threshold, weight_minor_overspeed,
             weight_severe_overspeed, weight_phone_use, privacy_telemetry_on,
             privacy_location_minimal, privacy_data_retention_days, privacy_sharing_on,
-            parent_email
-        ) VALUES (1, 5, 15, 5, 10, 10, 1, 1, 30, 1, '')
+            parent_email, user_id
+        ) VALUES (1, 5, 15, 5, 10, 10, 1, 1, 30, 1, '', 1)
         """)
 
-    # Seed default streak if empty
-    cursor.execute("SELECT COUNT(*) FROM streaks")
+    # Seed default streak for user 1 if empty
+    cursor.execute("SELECT COUNT(*) FROM streaks WHERE user_id = 1")
     if cursor.fetchone()[0] == 0:
         cursor.execute("""
-        INSERT INTO streaks (id, current_streak, longest_streak, last_trip_date)
-        VALUES (1, 0, 0, NULL)
+        INSERT INTO streaks (id, current_streak, longest_streak, last_trip_date, user_id)
+        VALUES (1, 0, 0, NULL, 1)
         """)
 
     # Seed default peer pod data if empty

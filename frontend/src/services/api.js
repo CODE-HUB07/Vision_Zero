@@ -9,8 +9,14 @@ if (!API_BASE) {
 
 async function request(path, options = {}) {
   const url = `${API_BASE}${path}`;
+  
+  // Retrieve token from localStorage
+  const token = localStorage.getItem("safeguard_token");
+  const authHeaders = token ? { "Authorization": `Bearer ${token}` } : {};
+
   const headers = {
     "Content-Type": "application/json",
+    ...authHeaders,
     ...options.headers,
   };
   
@@ -30,6 +36,32 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  // Auth
+  login: (email, password) => request("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password })
+  }),
+  register: (name, email, password) => request("/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ name, email, password })
+  }),
+  logout: () => Promise.resolve({ status: "success" }),
+  getMe: () => request("/auth/me"),
+  updateProfile: (profileData) => request("/profile/update", {
+    method: "POST",
+    body: JSON.stringify(profileData)
+  }),
+
+  // Parental Notifications
+  getNotificationsHistory: () => request("/notifications/history"),
+  retryNotifications: () => request("/notifications/retry", {
+    method: "POST"
+  }),
+  updateNotificationStatus: (tripId, eventType, status) => request("/notifications/status", {
+    method: "POST",
+    body: JSON.stringify({ trip_id: tripId, event_type: eventType, status })
+  }),
+
   // Settings
   getSettings: () => request("/settings"),
   updateSettings: (settings) => request("/settings", { method: "POST", body: JSON.stringify(settings) }),

@@ -1,4 +1,4 @@
-﻿__pycache__/
+__pycache__/
 *.pyc
 *.pyo
 *.db
@@ -6,5 +6,8 @@
 .env.*
 node_modules/
 dist/
-
-__pycache__/
+*.mkv
+*.mp4
+*.zip
+*.tar.gz
+*.rar

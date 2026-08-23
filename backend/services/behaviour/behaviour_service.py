@@ -17,13 +17,13 @@ def evaluate_speed_level(speed, speed_limit, settings):
     else:
         return 'SAFE'
 
-def process_telemetry_compliance(trip_id, speed, speed_limit, phone_use, timestamp, source="telemetry"):
+def process_telemetry_compliance(user_id, trip_id, speed, speed_limit, phone_use, timestamp, source="telemetry"):
     """
     Core behaviour & risk engine.
     Analyzes current telemetry tick, detects event transitions, writes events/nudges,
     and returns risk assessment.
     """
-    settings = get_settings()
+    settings = get_settings(user_id)
     current_speed_level = evaluate_speed_level(speed, speed_limit, settings)
     
     conn = get_db_connection()

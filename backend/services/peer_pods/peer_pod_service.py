@@ -1,11 +1,27 @@
 from database.database import get_db_connection
 
-def get_pod_details():
+def get_pod_details(user_id: int):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Get all members of ROAD GUARDIANS
-    cursor.execute("SELECT * FROM peer_pods WHERE pod_name = 'ROAD GUARDIANS' ORDER BY weekly_score DESC")
+    # Ensure user has a record in peer_pods
+    cursor.execute("SELECT COUNT(*) FROM peer_pods WHERE is_user = 1 AND user_id = ?", (user_id,))
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("SELECT name FROM users WHERE id = ?", (user_id,))
+        user_row = cursor.fetchone()
+        uname = user_row['name'] if user_row else "Driver"
+        cursor.execute("""
+            INSERT INTO peer_pods (pod_name, member_name, weekly_score, streak, contribution, is_user, user_id)
+            VALUES ('ROAD GUARDIANS', ?, 100, 0, 0, 1, ?)
+        """, (uname, user_id))
+        conn.commit()
+        
+    # Get all members: the current logged in user plus mock teammates
+    cursor.execute("""
+        SELECT * FROM peer_pods 
+        WHERE (is_user = 1 AND user_id = ?) OR (is_user = 0 AND user_id IS NULL)
+        ORDER BY weekly_score DESC
+    """, (user_id,))
     members_rows = cursor.fetchall()
     
     # Calculate average pod reputation

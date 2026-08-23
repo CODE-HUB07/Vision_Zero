@@ -1,6 +1,6 @@
 from database.database import get_db_connection
 
-def get_analytics_summary(time_filter="30 Days"):
+def get_analytics_summary(user_id: int, time_filter="30 Days"):
     """
     Computes system-wide KPIs: Behavioural, Engagement, Social, and Outcomes.
     """
@@ -8,7 +8,7 @@ def get_analytics_summary(time_filter="30 Days"):
     cursor = conn.cursor()
     
     # Fetch user trips
-    cursor.execute("SELECT * FROM trips WHERE end_time IS NOT NULL")
+    cursor.execute("SELECT * FROM trips WHERE end_time IS NOT NULL AND user_id = ?", (user_id,))
     trips = [dict(t) for t in cursor.fetchall()]
     
     total_trips = len(trips)
@@ -25,7 +25,7 @@ def get_analytics_summary(time_filter="30 Days"):
     phone_uses_per_trip = (total_phone_uses / total_trips) if total_trips > 0 else 0.0
     
     # 2. Engagement KPIs
-    cursor.execute("SELECT COUNT(*) FROM user_rewards")
+    cursor.execute("SELECT COUNT(*) FROM user_rewards WHERE user_id = ?", (user_id,))
     redemptions_count = cursor.fetchone()[0]
     
     # Mocking system-wide engagement (offline requirement)

@@ -2,26 +2,39 @@ from database.database import get_db_connection
 from datetime import datetime
 
 REWARDS_CATALOG = [
-    {"id": "fuel_discount", "name": "Prototype Fuel Discount (10% off)", "cost": 100, "description": "Get a 10% discount on your next fuel purchase at partner stations."},
-    {"id": "mobile_data", "name": "Prototype Mobile Data Boost (5GB)", "cost": 250, "description": "5GB high-speed mobile data voucher valid for 30 days."},
-    {"id": "cashback", "name": "Prototype Cashback Reward ($25)", "cost": 500, "description": "$25 cashback credited to your registered wallet/bank account."},
-    {"id": "insurance_benefit", "name": "Prototype Insurance Premium Benefit", "cost": 1000, "description": "Reduce your monthly car insurance premium by 15%."}
+    {"id": "fuel_discount", "name": "Fuel Discount (10% off)", "cost": 100, "description": "Get a 10% discount on your next fuel purchase at partner stations."},
+    {"id": "mobile_data", "name": "Mobile Data Boost (5GB)", "cost": 250, "description": "5GB high-speed mobile data voucher valid for 30 days."},
+    {"id": "cashback", "name": "Cashback Reward ($25)", "cost": 500, "description": "$25 cashback credited to your registered wallet/bank account."},
+    {"id": "insurance_benefit", "name": "Insurance Premium Benefit", "cost": 1000, "description": "Reduce your monthly car insurance premium by 15%."}
 ]
 
-def get_points_summary():
+def get_points_summary(user_id: int):
     """
-    Computes total points earned, points spent, and current balance.
+    Computes total points earned, points spent, and current balance for a user.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
     
     # Get user's total points contribution from peer_pods (includes trips and self-reporting)
-    cursor.execute("SELECT contribution FROM peer_pods WHERE is_user = 1")
+    cursor.execute("SELECT contribution FROM peer_pods WHERE is_user = 1 AND user_id = ?", (user_id,))
     row = cursor.fetchone()
-    total_earned = row['contribution'] if row else 0
+    
+    if not row:
+        # Seed default pod entry for user
+        cursor.execute("SELECT name FROM users WHERE id = ?", (user_id,))
+        user_row = cursor.fetchone()
+        uname = user_row['name'] if user_row else "Driver"
+        cursor.execute("""
+            INSERT INTO peer_pods (pod_name, member_name, weekly_score, streak, contribution, is_user, user_id)
+            VALUES ('ROAD GUARDIANS', ?, 100, 0, 0, 1, ?)
+        """, (uname, user_id))
+        conn.commit()
+        total_earned = 0
+    else:
+        total_earned = row['contribution']
     
     # Points spent on rewards
-    cursor.execute("SELECT SUM(cost_points) FROM user_rewards")
+    cursor.execute("SELECT SUM(cost_points) FROM user_rewards WHERE user_id = ?", (user_id,))
     total_spent = cursor.fetchone()[0] or 0
     
     conn.close()
@@ -35,7 +48,7 @@ def get_points_summary():
 def get_rewards_catalog():
     return REWARDS_CATALOG
 
-def redeem_reward(reward_id):
+def redeem_reward(user_id: int, reward_id: str):
     """
     Deducts points if balance is sufficient, and logs redemption.
     """
@@ -43,63 +56,57 @@ def redeem_reward(reward_id):
     if not reward:
         return {"error": "Reward not found"}
         
-    summary = get_points_summary()
+    summary = get_points_summary(user_id)
     if summary["balance"] < reward["cost"]:
         return {"error": f"Insufficient points. You need {reward['cost']} points but only have {summary['balance']}."}
         
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO user_rewards (reward_id, name, cost_points, redeemed_at, status)
-        VALUES (?, ?, ?, ?, ?)
-    """, (reward["id"], reward["name"], reward["cost"], datetime.now().isoformat(), "Active"))
+        INSERT INTO user_rewards (reward_id, name, cost_points, redeemed_at, status, user_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (reward["id"], reward["name"], reward["cost"], datetime.now().isoformat(), "Active", user_id))
     
     conn.commit()
     conn.close()
     
     return {"status": "success", "reward": reward}
 
-def get_redemption_history():
+def get_redemption_history(user_id: int):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM user_rewards ORDER BY redeemed_at DESC")
+    cursor.execute("SELECT * FROM user_rewards WHERE user_id = ? ORDER BY redeemed_at DESC", (user_id,))
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
-def get_badges():
+def get_badges(user_id: int):
     """
     Dynamically checks which badges the user has unlocked based on real DB values.
-    Badges:
-    - Road Guardian: unlocked if user has safety score of 100 on at least 3 trips
-    - Safe Streak: unlocked if current streak >= 5
-    - Phone-Free Driver: unlocked if user has 100% phone-free driving on any trip
-    - Speed Discipline: unlocked if user has 100% speed compliance on any trip
-    - Consistency Champion: unlocked if completed at least 5 total trips
     """
     conn = get_db_connection()
     cursor = conn.cursor()
     
     # 1. Total Completed Trips
-    cursor.execute("SELECT COUNT(*) FROM trips WHERE end_time IS NOT NULL")
+    cursor.execute("SELECT COUNT(*) FROM trips WHERE end_time IS NOT NULL AND user_id = ?", (user_id,))
     completed_trips = cursor.fetchone()[0]
     
     # 2. Perfect 100 score trips
-    cursor.execute("SELECT COUNT(*) FROM trips WHERE safety_score = 100.0 AND end_time IS NOT NULL")
+    cursor.execute("SELECT COUNT(*) FROM trips WHERE safety_score = 100.0 AND end_time IS NOT NULL AND user_id = ?", (user_id,))
     perfect_trips = cursor.fetchone()[0]
     
     # 3. Safe Streak info
-    cursor.execute("SELECT current_streak, longest_streak FROM streaks WHERE id = 1")
+    cursor.execute("SELECT current_streak, longest_streak FROM streaks WHERE user_id = ?", (user_id,))
     streak_row = cursor.fetchone()
     current_streak = streak_row['current_streak'] if streak_row else 0
     longest_streak = streak_row['longest_streak'] if streak_row else 0
     
     # 4. Perfect Phone Free Trip
-    cursor.execute("SELECT COUNT(*) FROM trips WHERE phone_free_pct = 100.0 AND end_time IS NOT NULL")
+    cursor.execute("SELECT COUNT(*) FROM trips WHERE phone_free_pct = 100.0 AND end_time IS NOT NULL AND user_id = ?", (user_id,))
     perfect_phone_trips = cursor.fetchone()[0]
     
     # 5. Perfect Speed Compliance Trip
-    cursor.execute("SELECT COUNT(*) FROM trips WHERE speed_compliance_pct = 100.0 AND end_time IS NOT NULL")
+    cursor.execute("SELECT COUNT(*) FROM trips WHERE speed_compliance_pct = 100.0 AND end_time IS NOT NULL AND user_id = ?", (user_id,))
     perfect_speed_trips = cursor.fetchone()[0]
     
     conn.close()
@@ -143,7 +150,7 @@ def get_badges():
     ]
     return badges_list
 
-def log_self_reported_event(event_type, description, timestamp):
+def log_self_reported_event(user_id: int, event_type: str, description: str, timestamp: str):
     """
     Logs a self-reported compliance deviation or event.
     """
@@ -160,23 +167,35 @@ def log_self_reported_event(event_type, description, timestamp):
         severity = "INFO"
         
     cursor.execute("""
-        INSERT INTO events (trip_id, event_type, severity, speed, speed_limit, timestamp, source)
-        VALUES (NULL, ?, ?, 0.0, 0.0, ?, ?)
-    """, (f"SELF_REPORTED_EVENT: {event_type} - {description}", severity, timestamp, "self_report"))
+        INSERT INTO events (trip_id, event_type, severity, speed, speed_limit, timestamp, source, user_id)
+        VALUES (NULL, ?, ?, 0.0, 0.0, ?, ?, ?)
+    """, (f"SELF_REPORTED_EVENT: {event_type} - {description}", severity, timestamp, "self_report", user_id))
     
     # Deduct a light penalty or award a small point for honesty
-    # Let's say if they report a violation they lose 2 points, but reporting a safe trip awards 2 points
     points_change = 0
     if severity == "WARNING":
         points_change = -5  # minor penalty for violation
     elif severity == "SAFE":
         points_change = 2   # small reward for logging safe behaviour
         
-    # Since self-reports don't have trips, we can create a placeholder trip if needed, or adjust points directly.
-    # Actually, we can log self-reports to trip history as a dummy/manual log, or just let it adjust the pod contribution.
-    # Let's deduct/award points to the user's pod contribution.
+    # Seed user in peer pods if missing
+    cursor.execute("SELECT COUNT(*) FROM peer_pods WHERE is_user = 1 AND user_id = ?", (user_id,))
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("SELECT name FROM users WHERE id = ?", (user_id,))
+        user_row = cursor.fetchone()
+        uname = user_row['name'] if user_row else "Driver"
+        cursor.execute("""
+            INSERT INTO peer_pods (pod_name, member_name, weekly_score, streak, contribution, is_user, user_id)
+            VALUES ('ROAD GUARDIANS', ?, 100, 0, 0, 1, ?)
+        """, (uname, user_id))
+        conn.commit()
+
     if points_change != 0:
-        cursor.execute("UPDATE peer_pods SET contribution = MAX(0, contribution + ?) WHERE is_user = 1", (points_change,))
+        cursor.execute("""
+            UPDATE peer_pods 
+            SET contribution = MAX(0, contribution + ?) 
+            WHERE is_user = 1 AND user_id = ?
+        """, (points_change, user_id))
         
     conn.commit()
     conn.close()
