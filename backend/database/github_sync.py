@@ -22,7 +22,17 @@ def get_headers():
         "User-Agent": "FastAPI-Vercel-Sync"
     }
 
+db_is_dirty = False
+
+def set_db_dirty(dirty: bool):
+    global db_is_dirty
+    db_is_dirty = dirty
+
 def download_db():
+    global db_is_dirty
+    if db_is_dirty:
+        print("[GitHub Sync] Local database has un-uploaded changes. Skipping download to prevent clobbering.")
+        return False
     if not GITHUB_TOKEN:
         print("[GitHub Sync] GITHUB_TOKEN not configured. Skipping download.")
         return False
@@ -53,7 +63,9 @@ def download_db():
         return False
 
 def upload_db():
+    global db_is_dirty
     if not GITHUB_TOKEN:
+        db_is_dirty = True
         return False
         
     if not os.path.exists(DB_PATH):
@@ -94,9 +106,11 @@ def upload_db():
         
         with urllib.request.urlopen(req_put) as response:
             print("[GitHub Sync] Successfully uploaded database to GitHub.")
+            db_is_dirty = False
             return True
     except Exception as e:
         print("[GitHub Sync] Error uploading database:", e)
+        db_is_dirty = True
         return False
     finally:
         upload_lock.release()

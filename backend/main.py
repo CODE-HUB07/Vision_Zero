@@ -39,6 +39,8 @@ app.include_router(router, prefix="/api")
 async def db_sync_middleware(request: Request, call_next):
     response = await call_next(request)
     if request.method in ["POST", "PUT", "DELETE"] and 200 <= response.status_code < 300:
+        from database.github_sync import set_db_dirty, upload_db
+        set_db_dirty(True)
         upload_db()
     return response
 
