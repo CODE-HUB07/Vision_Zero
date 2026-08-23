@@ -28,11 +28,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from database.github_sync import download_db, upload_db_async
+from fastapi import Request
+
 # Register API Router
 app.include_router(router, prefix="/api")
 
+# HTTP Middleware to sync database mutations back to GitHub asynchronously
+@app.middleware("http")
+async def db_sync_middleware(request: Request, call_next):
+    response = await call_next(request)
+    if request.method in ["POST", "PUT", "DELETE"] and 200 <= response.status_code < 300:
+        upload_db_async()
+    return response
+
 @app.on_event("startup")
 def startup_event():
+    # Download the latest database from GitHub before initializing
+    download_db()
     # Automatically initialize SQLite schemas and seeds
     init_db()
 
