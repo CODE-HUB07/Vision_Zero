@@ -23,7 +23,7 @@ def run_tests():
     conn.commit()
     conn.close()
     
-    settings = get_settings()
+    settings = get_settings(1)
     print("Current Settings in DB:", settings)
     
     print("\n=== Test 1: Speed compliance evaluations ===")
@@ -46,7 +46,7 @@ def run_tests():
     trip_id = "test_trip_1"
     
     # First tick: Safe
-    res1 = process_telemetry_compliance(trip_id, 35, 40, False, "10:00:00")
+    res1 = process_telemetry_compliance(1, trip_id, 35, 40, False, "10:00:00")
     print("Safe driving tick response:", res1)
     assert res1["risk_level"] == "SAFE"
     assert len(res1["events"]) == 0
@@ -61,7 +61,7 @@ def run_tests():
     conn.commit()
     
     # Second tick: Overspeed (+7 km/h) -> WARNING
-    res2 = process_telemetry_compliance(trip_id, 47, 40, False, "10:00:01")
+    res2 = process_telemetry_compliance(1, trip_id, 47, 40, False, "10:00:01")
     print("Overspeed warning tick response:", res2)
     assert res2["risk_level"] == "WARNING"
     assert len(res2["events"]) == 1
@@ -75,7 +75,7 @@ def run_tests():
     conn.commit()
     
     # Third tick: Phone Use -> HIGH_RISK
-    res3 = process_telemetry_compliance(trip_id, 35, 40, True, "10:00:02")
+    res3 = process_telemetry_compliance(1, trip_id, 35, 40, True, "10:00:02")
     print("Phone use tick response:", res3)
     assert res3["risk_level"] == "HIGH_RISK"
     assert len(res3["events"]) == 2

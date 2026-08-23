@@ -113,9 +113,9 @@ def process_telemetry_compliance(user_id, trip_id, speed, speed_limit, phone_use
     score_deduction = 0
     for ev in events_triggered:
         cursor.execute("""
-            INSERT INTO events (trip_id, event_type, severity, speed, speed_limit, timestamp, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (trip_id, ev['event_type'], ev['severity'], ev['speed'], ev['speed_limit'], ev['timestamp'], ev['source']))
+            INSERT INTO events (trip_id, event_type, severity, speed, speed_limit, timestamp, source, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (trip_id, ev['event_type'], ev['severity'], ev['speed'], ev['speed_limit'], ev['timestamp'], ev['source'], user_id))
         
         # Calculate deduction
         if ev['event_type'] == 'OVERSPEED':

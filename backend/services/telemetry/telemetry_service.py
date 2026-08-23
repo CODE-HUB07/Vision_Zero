@@ -30,6 +30,16 @@ def log_telemetry_tick(trip_id, speed, speed_limit, phone_use, timestamp, latitu
     # 1. Fetch user_id for this trip
     cursor.execute("SELECT user_id FROM trips WHERE id = ?", (trip_id,))
     trip_row = cursor.fetchone()
+    if not trip_row:
+        from database.github_sync import download_db
+        print(f"[GitHub Sync] Trip {trip_id} not found in telemetry tick. Syncing database...")
+        conn.close()
+        download_db()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM trips WHERE id = ?", (trip_id,))
+        trip_row = cursor.fetchone()
+        
     user_id = trip_row['user_id'] if trip_row else 1
     
     # 2. Run behaviour checks
@@ -130,6 +140,16 @@ def end_trip(trip_id, end_time):
     cursor.execute("SELECT * FROM trips WHERE id = ?", (trip_id,))
     trip = cursor.fetchone()
     
+    if not trip:
+        from database.github_sync import download_db
+        print(f"[GitHub Sync] Trip {trip_id} not found in end trip. Syncing database...")
+        conn.close()
+        download_db()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM trips WHERE id = ?", (trip_id,))
+        trip = cursor.fetchone()
+        
     if not trip:
         conn.close()
         return {"error": "Trip not found"}

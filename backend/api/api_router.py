@@ -286,6 +286,17 @@ def get_trip(trip_id: str, current_user: dict = Depends(get_current_user)):
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM trips WHERE id = ? AND user_id = ?", (trip_id, current_user["id"]))
     trip = cursor.fetchone()
+    
+    if not trip:
+        from database.github_sync import download_db
+        print(f"[GitHub Sync] Trip {trip_id} not found in get_trip. Syncing database...")
+        conn.close()
+        download_db()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM trips WHERE id = ? AND user_id = ?", (trip_id, current_user["id"]))
+        trip = cursor.fetchone()
+        
     conn.close()
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
