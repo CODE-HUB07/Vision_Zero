@@ -22,6 +22,10 @@ async function request(path, options = {}) {
   
   const response = await fetch(url, { ...options, headers });
   if (!response.ok) {
+    if (response.status === 401 && !path.includes("/auth/login") && !path.includes("/auth/register")) {
+      localStorage.removeItem("safeguard_token");
+      window.location.reload();
+    }
     const errText = await response.text();
     let message = "Network response was not ok";
     try {
